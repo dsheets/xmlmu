@@ -11,3 +11,8 @@ With OPAM:
 opam install uri xmlm
 make && make install
 ```
+
+## License
+
+**xmlmu** is licensed under the permissive ISC license. See the LICENSE
+  file for the copyright notice and full license text.
