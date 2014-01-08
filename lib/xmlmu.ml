@@ -20,6 +20,7 @@ module M = Map.Make(String)
 type pos = Uri.t * int
 type t = { signal : Xmlm.signal; src : Uri.t; line : int; }
 
+type 'a name_map = 'a M.t
 type scope = { prefix : string M.t; entity : string M.t; }
 
 type input = {
@@ -47,12 +48,14 @@ let empty_src = Uri.of_string ""
    prov stack
 *)
 
+let empty_scope = { prefix=M.empty; entity=M.empty; }
+
 let lookup stack key proj = match !stack with
   | [] -> None
   | s::_ -> (try Some (M.find key (proj s)) with Not_found -> None)
 
 let make_input src ic =
-  let stack = ref [{ prefix=M.empty; entity=M.empty; }] in
+  let stack = ref [] in
   let ns prefix = lookup stack prefix (fun s -> s.prefix) in
   let entity ent = lookup stack ent (fun s -> s.entity) in
   let inp = Xmlm.make_input ~ns ~entity (`Channel ic) in
@@ -97,6 +100,9 @@ let input i = i.input ()
 let peek i = i.peek ()
 let eoi i = i.eoi ()
 let pos i = i.pos ()
+let push_scope i scope = i.stack := scope::!(i.stack)
+let peek_scope i = match !(i.stack) with [] -> empty_scope | s::_ -> s
+let drop_scope i = match !(i.stack) with [] -> () | _::t -> i.stack := t
 
 let transform t signal (src,line) =
   { signal; src; line; } (* TODO: prov stack *)

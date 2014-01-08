@@ -17,6 +17,9 @@
 
 type pos = Uri.t * int
 type t
+
+type 'a name_map = 'a Map.Make(String).t
+type scope = { prefix : string name_map; entity : string name_map; }
 type input
 type output
 type signal = Xmlm.signal
@@ -37,6 +40,9 @@ val input : input -> t
 val peek : input -> t
 val eoi : input -> bool
 val pos : input -> pos
+val push_scope : input -> scope -> unit
+val peek_scope : input -> scope
+val drop_scope : input -> unit
 
 val transform : t -> signal -> pos -> t
 val synthesize: signal -> pos -> t
