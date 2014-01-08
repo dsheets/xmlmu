@@ -15,7 +15,9 @@
  *
  *)
 
-type transform = (Xmlmu.t -> unit) -> Xmlmu.t -> unit
+type k = env -> Xmlmu.t -> unit
+and env = { enter_k : k; exit_k : k; input : Xmlmu.input; }
+type transform = k -> k
 
 module type INTERP = sig
   type dtd
@@ -153,24 +155,24 @@ module Interpreter : INTERP = struct
   type a. (transform t -> transform) -> a queue -> (a t -> transform t)
     -> transform =
     fun eval q f k ->
-      let rec pump event = match q.head with
+      let rec pump env event = match q.head with
         | [] -> (match q.tail with
-          | [] -> k event
-          | tl -> q.head <- List.rev tl; q.tail <- []; pump event)
+          | [] -> k env event
+          | tl -> q.head <- List.rev tl; q.tail <- []; pump env event)
         | x::xs ->
           q.head <- xs;
-          eval (f x) pump event
+          eval (f x) pump env event
       in pump
 
   let eval exprf =
     let expr = exprf () in
-    let rec eval_transform expr = (fun k event ->
+    let rec eval_transform expr = (fun k env event ->
       let signal = Xmlmu.signal event in
       match signal with
-      | `Dtd d -> dtd_event d event expr k event
-      | `Data _ -> k event
-      | `El_start el -> el_start el event expr k event
-      | `El_end -> el_end expr k event
+      | `Dtd d -> dtd_event d event expr k env event
+      | `Data _ -> k env event
+      | `El_start el -> el_start el event expr k env event
+      | `El_end -> el_end expr k env event
     )
     and el_start : type a. Xmlm.tag -> Xmlmu.t -> a t -> a = begin
       fun (((ns,el),attrs) as tag) event -> function
@@ -190,11 +192,11 @@ module Interpreter : INTERP = struct
         | (_,v)::_ -> el_start tag event (top v)
       end
       | Identity -> fun x -> x
-      | Replace_xmlns ns_expr -> fun k event ->
+      | Replace_xmlns ns_expr -> fun k env event ->
         let s = el_start tag event ns_expr in
-        k (Xmlmu.transform event
-             (`El_start ((s,el),attrs))
-             (Xmlmu.(src event, line event))) (* TODO: prov? *)
+        k env (Xmlmu.transform event
+                 (`El_start ((s,el),attrs))
+                 (Xmlmu.(src event, line event))) (* TODO: prov? *)
       | Declare_xmlns (prefix,ns) ->
         let s = el_start tag event ns in
         el_start tag event (Add_attr (attr ((Xmlm.ns_xmlns,prefix),s)))
@@ -218,16 +220,16 @@ module Interpreter : INTERP = struct
         let branch = try List.assoc t cases
           with Not_found -> default in
         el_start tag event branch
-      | Add_attr attr -> fun k event ->
-        k (Xmlmu.transform event
-             (`El_start ((ns,el),(el_start tag event attr)::attrs))
-             (Xmlmu.(src event, line event))) (* TODO: prov? *)
+      | Add_attr attr -> fun k env event ->
+        k env (Xmlmu.transform event
+                 (`El_start ((ns,el),(el_start tag event attr)::attrs))
+                 (Xmlmu.(src event, line event))) (* TODO: prov? *)
       | Pipe stages -> List.fold_right eval_transform stages
-      | Emit_before before_event -> fun k event ->
-        eval_transform expr k (el_start tag event before_event); k event
-      | Emit_after after_event -> fun k event ->
-        k event; eval_transform expr k (el_start tag event after_event)
-      | Drop -> fun _ _ -> ()
+      | Emit_before before_event -> fun k env event ->
+        eval_transform expr k env (el_start tag event before_event); k env event
+      | Emit_after after_event -> fun k env event ->
+        k env event; eval_transform expr k env (el_start tag event after_event)
+      | Drop -> fun _ _ _ -> ()
       | Dtd_signal dtd ->
         let so = el_start tag event dtd in
         Xmlmu.(synthesize (`Dtd so) (empty_src,0)) (* TODO: prov *)
@@ -261,11 +263,11 @@ module Interpreter : INTERP = struct
       | Match (_,_,default) -> el_end default (* TODO: default? *)
       | Add_attr _ -> (@@)
       | Pipe stages     -> List.fold_right eval_transform stages
-      | Emit_before before_event -> fun k event ->
-        eval_transform expr k (el_end before_event); k event
-      | Emit_after after_event -> fun k event ->
-        k event; eval_transform expr k (el_end after_event)
-      | Drop -> fun _ _ -> ()
+      | Emit_before before_event -> fun k env event ->
+        eval_transform expr k env (el_end before_event); k env event
+      | Emit_after after_event -> fun k env event ->
+        k env event; eval_transform expr k env (el_end after_event)
+      | Drop -> fun _ _ _ -> ()
       | Dtd_signal dtd ->
         let so = el_end dtd in
         Xmlmu.(synthesize (`Dtd so) (empty_src,0)) (* TODO: prov *)
@@ -306,11 +308,13 @@ module Interpreter : INTERP = struct
         dtd_event dtdo event branch
       | Add_attr _ -> (@@)
       | Pipe stages -> List.fold_right eval_transform stages
-      | Emit_before before_event -> fun k event ->
-        eval_transform expr k (dtd_event dtdo event before_event); k event
-      | Emit_after after_event -> fun k event ->
-        k event; eval_transform expr k (dtd_event dtdo event after_event)
-      | Drop -> fun _ _ -> ()
+      | Emit_before before_event -> fun k env event ->
+        eval_transform expr k env (dtd_event dtdo event before_event);
+        k env event
+      | Emit_after after_event -> fun k env event ->
+        k env event;
+        eval_transform expr k env (dtd_event dtdo event after_event)
+      | Drop -> fun _ _ _ -> ()
       | Dtd_signal dtd ->
         let so = dtd_event dtdo event dtd in
         Xmlmu.(synthesize (`Dtd so) (empty_src,0)) (* TODO: prov *)
@@ -325,8 +329,9 @@ let to_input input transform =
   let buffer_tail = ref [] in
   let rec spool () = match !buffer_head with
     | [] -> (match !buffer_tail with
-      | [] -> transform
-        (fun event -> buffer_tail := event::!buffer_tail)
+      | [] -> transform (* TODO: use env to modulate output *)
+        (fun _ event -> buffer_tail := event::!buffer_tail)
+        { enter_k=(fun _ _ -> ()); exit_k=(fun _ _ -> ()); input; }
         (Xmlmu.input input)
       | xs -> buffer_head := List.rev xs
     ); spool ()
@@ -334,7 +339,10 @@ let to_input input transform =
   in
   Xmlmu.input_of_generator spool
 
-let pump inp transform outp =
-  while not (Xmlmu.eoi inp) do
-    transform (Xmlmu.output outp) (Xmlmu.input inp)
+let pump input transform output =
+  while not (Xmlmu.eoi input) do
+    transform
+      (fun _ -> (Xmlmu.output output)) (* TODO: use env to modulate output *)
+      { enter_k=(fun _ _ -> ()); exit_k=(fun _ _ -> ()); input; }
+      (Xmlmu.input input)
   done

@@ -15,7 +15,9 @@
  *
  *)
 
-type transform = (Xmlmu.t -> unit) -> Xmlmu.t -> unit
+type k = env -> Xmlmu.t -> unit
+and env = { enter_k : k; exit_k : k; input : Xmlmu.input; }
+type transform = k -> k
 
 module type INTERP = sig
   type dtd
