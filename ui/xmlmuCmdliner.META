@@ -1,0 +1,7 @@
+
+package "cmdliner" (
+  archive(byte) = "xmlmuCmdliner.cma"
+  archive(native) = "xmlmuCmdliner.cmxa"
+  exists_if = "xmlmuCmdliner.cma"
+  requires = "xmlmu cmdliner"
+)

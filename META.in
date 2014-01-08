@@ -1,0 +1,7 @@
+version = "0.1.0"
+description = "XML MarkUp stream processing"
+archive(byte) = "xmlmu.cma"
+archive(native) = "xmlmu.cmxa"
+exists_if = "xmlmu.cma"
+requires = "xmlm uri"
+
